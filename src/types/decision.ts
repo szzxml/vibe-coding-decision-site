@@ -28,9 +28,10 @@ export type OptionId =
 
 export type AnswerMap = Partial<{
   deliveryTarget: DeliveryTargetOptionId;
-  projectNeed: ProjectNeedOptionId;
+  projectNeed: ProjectNeedOptionId[];
   expectedScale: ExpectedScaleOptionId;
   techBackground: TechBackgroundOptionId;
+  secondaryTechBackground: TechBackgroundOptionId;
 }>;
 
 export interface DecisionOption {
@@ -54,11 +55,18 @@ export interface StackItem {
   source: string;
 }
 
+export interface AlternateRoute {
+  title: string;
+  summary: string;
+  stack: StackItem[];
+}
+
 export interface Recommendation {
   routeTitle: string;
   routeSummary: string;
   routeTag: string;
   decisionPath: string[];
+  alternateRoutes: AlternateRoute[];
   stack: StackItem[];
   todayTasks: string[];
   weekTasks: string[];

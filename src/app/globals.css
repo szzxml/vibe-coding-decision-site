@@ -346,6 +346,7 @@ button {
 
 .toy-label-tape {
   display: block;
+  flex: 1 1 190px;
   max-width: 100%;
   border: 2px solid rgba(23, 32, 51, 0.75);
   border-radius: 5px;
@@ -355,6 +356,21 @@ button {
   font-size: 0.75rem;
   font-weight: 900;
   line-height: 1.45;
+}
+
+.toy-option-badge {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border: 2px solid var(--toy-line);
+  border-radius: 999px;
+  background: var(--toy-accent);
+  color: #fff8e7;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1.25;
+  box-shadow: 0 3px 0 var(--toy-line);
 }
 
 .toy-action {
@@ -612,6 +628,83 @@ button {
   line-height: 1.3;
 }
 
+.toy-alt-routes {
+  border: 3px solid var(--toy-line);
+  border-radius: 8px;
+  background: #ffedd5;
+  padding: 14px;
+  box-shadow: 0 5px 0 rgba(23, 32, 51, 0.94);
+}
+
+.toy-alt-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.toy-alt-card {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+  border: 2px solid var(--toy-line);
+  border-radius: 8px;
+  background: #fff8e7;
+  padding: 12px;
+  box-shadow: 0 3px 0 rgba(23, 32, 51, 0.94);
+}
+
+.toy-alt-label {
+  display: inline-flex;
+  border: 2px solid rgba(23, 32, 51, 0.72);
+  border-radius: 999px;
+  background: #dbeafe;
+  padding: 3px 8px;
+  color: #172033;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.toy-alt-card h4 {
+  margin: 8px 0 0;
+  color: #172033;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.toy-alt-card p:not(.toy-alt-label) {
+  margin: 8px 0 0;
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.toy-alt-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toy-alt-stack span,
+.toy-alt-empty {
+  border: 2px solid rgba(23, 32, 51, 0.72);
+  border-radius: 8px;
+  background: #ccefe6;
+  color: #172033;
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.toy-alt-stack span {
+  padding: 5px 8px;
+}
+
+.toy-alt-empty {
+  padding: 10px 12px;
+}
+
 @media (min-width: 1280px) {
   .toy-result-head {
     grid-template-columns: minmax(0, 1fr) 290px;
@@ -619,6 +712,10 @@ button {
   }
 
   .toy-stack-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toy-alt-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

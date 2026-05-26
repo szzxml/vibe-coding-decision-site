@@ -1,4 +1,14 @@
-import type { AnswerMap, DecisionQuestion, Recommendation, StackItem } from "@/types/decision";
+import type {
+  AlternateRoute,
+  AnswerMap,
+  DecisionQuestion,
+  DeliveryTargetOptionId,
+  ExpectedScaleOptionId,
+  ProjectNeedOptionId,
+  Recommendation,
+  StackItem,
+  TechBackgroundOptionId
+} from "@/types/decision";
 
 export const questions: DecisionQuestion[] = [
   {
@@ -60,7 +70,7 @@ export const questions: DecisionQuestion[] = [
   {
     id: "projectNeed",
     eyebrow: "问题二：项目本质",
-    title: "这个项目本质上需要做什么？",
+    title: "这个项目本质上包含哪些能力？",
     options: [
       {
         id: "contentOnly",
@@ -137,7 +147,7 @@ export const questions: DecisionQuestion[] = [
   {
     id: "techBackground",
     eyebrow: "问题四：技术背景",
-    title: "团队或个人更熟悉什么？",
+    title: "主技术背景与备选背景是什么？",
     options: [
       {
         id: "javascript",
@@ -184,7 +194,7 @@ const defaultRisks = [
   "规模预期如果没有真实数据，先用托管服务、清晰边界和可迁移设计保留调整空间。"
 ];
 
-const targetLabel: Record<NonNullable<AnswerMap["deliveryTarget"]>, string> = {
+const targetLabel: Record<DeliveryTargetOptionId, string> = {
   webApp: "Web 应用",
   desktopApp: "桌面应用",
   androidNative: "Android 原生",
@@ -194,7 +204,7 @@ const targetLabel: Record<NonNullable<AnswerMap["deliveryTarget"]>, string> = {
   embeddedApp: "嵌入式或硬件"
 };
 
-const needLabel: Record<NonNullable<AnswerMap["projectNeed"]>, string> = {
+const needLabel: Record<ProjectNeedOptionId, string> = {
   contentOnly: "展示内容为主",
   login: "需要用户登录",
   storage: "需要持久化存储",
@@ -203,19 +213,45 @@ const needLabel: Record<NonNullable<AnswerMap["projectNeed"]>, string> = {
   nativeDevice: "设备原生能力"
 };
 
-const scaleLabel: Record<NonNullable<AnswerMap["expectedScale"]>, string> = {
+const scaleLabel: Record<ExpectedScaleOptionId, string> = {
   small: "个人或小规模",
   medium: "预期中等规模",
   large: "预期大规模"
 };
 
-const backgroundLabel: Record<NonNullable<AnswerMap["techBackground"]>, string> = {
+const backgroundLabel: Record<TechBackgroundOptionId, string> = {
   javascript: "熟悉 JavaScript / TypeScript",
   python: "熟悉 Python",
   cpp: "熟悉 C / C++",
   java: "熟悉 Java",
   newLearner: "全新学习"
 };
+
+const defaultProjectNeed: ProjectNeedOptionId = "contentOnly";
+
+function normalizeProjectNeeds(needs: AnswerMap["projectNeed"]): ProjectNeedOptionId[] {
+  if (!needs?.length) {
+    return [defaultProjectNeed];
+  }
+
+  return Array.from(new Set(needs));
+}
+
+function pickPrimaryNeed(needs: ProjectNeedOptionId[]) {
+  return needs.find((need) => need !== "contentOnly") ?? needs[0] ?? defaultProjectNeed;
+}
+
+function hasNeed(needs: ProjectNeedOptionId[], need: ProjectNeedOptionId) {
+  return needs.includes(need);
+}
+
+function formatNeedLabels(needs: ProjectNeedOptionId[]) {
+  return needs.map((need) => needLabel[need]).join(" + ");
+}
+
+function formatBackgroundLabels(primary: TechBackgroundOptionId, secondary?: TechBackgroundOptionId) {
+  return secondary ? `${backgroundLabel[primary]} + ${backgroundLabel[secondary]}` : backgroundLabel[primary];
+}
 
 function stackItem(label: string, source: string, reason: string): StackItem {
   return { label, reason, source };
@@ -238,7 +274,7 @@ function addStack(stack: StackItem[], items: StackItem[]) {
   stack.push(...items);
 }
 
-function addAndroidStack(stack: StackItem[], background: AnswerMap["techBackground"], need: AnswerMap["projectNeed"]) {
+function addAndroidStack(stack: StackItem[], background: TechBackgroundOptionId, needs: ProjectNeedOptionId[]) {
   if (background === "java") {
     addStack(stack, [
       stackItem("Android Studio", "平台：Android 原生", "官方 IDE，项目模板、调试、模拟器、签名和发布链路最完整。"),
@@ -275,12 +311,12 @@ function addAndroidStack(stack: StackItem[], background: AnswerMap["techBackgrou
     stackItem("Gradle", "构建系统", "管理依赖、构建变体和发布包。")
   ]);
 
-  if (need === "nativeDevice") {
+  if (hasNeed(needs, "nativeDevice")) {
     stack.push(stackItem("Android 权限与真机测试", "项目本质：设备原生能力", "相机、定位、蓝牙、传感器等能力必须在真机和多系统版本上验证。"));
   }
 }
 
-function addIosStack(stack: StackItem[], background: AnswerMap["techBackground"]) {
+function addIosStack(stack: StackItem[], background: TechBackgroundOptionId) {
   addStack(stack, [
     stackItem("Swift", "平台：iOS 原生", "iOS 原生开发的主语言，适合系统 API、设备能力和长期维护。"),
     stackItem("SwiftUI", "UI 层", "现代 iOS UI 的推荐起点，适合新项目和快速迭代。"),
@@ -293,7 +329,7 @@ function addIosStack(stack: StackItem[], background: AnswerMap["techBackground"]
   }
 }
 
-function addCrossPlatformStack(stack: StackItem[], background: AnswerMap["techBackground"]) {
+function addCrossPlatformStack(stack: StackItem[], background: TechBackgroundOptionId) {
   if (background === "javascript") {
     addStack(stack, [
       stackItem("React Native / Expo", "技术背景：JS/TS", "用 React 和 TypeScript 做 Android+iOS，一套主代码快速发布双端。"),
@@ -328,7 +364,7 @@ function addCrossPlatformStack(stack: StackItem[], background: AnswerMap["techBa
   ]);
 }
 
-function addDesktopStack(stack: StackItem[], background: AnswerMap["techBackground"]) {
+function addDesktopStack(stack: StackItem[], background: TechBackgroundOptionId) {
   if (background === "cpp") {
     addStack(stack, [
       stackItem("Qt 6", "平台：桌面应用", "适合 C++ 桌面程序、原生窗口、复杂控件、本地文件和跨桌面系统发布。"),
@@ -365,7 +401,7 @@ function addDesktopStack(stack: StackItem[], background: AnswerMap["techBackgrou
   ]);
 }
 
-function addCliStack(stack: StackItem[], background: AnswerMap["techBackground"]) {
+function addCliStack(stack: StackItem[], background: TechBackgroundOptionId) {
   if (background === "python" || background === "newLearner") {
     addStack(stack, [
       stackItem("Typer", "平台：CLI 工具", "Python CLI 心智清晰，适合参数、子命令和类型提示。"),
@@ -400,7 +436,7 @@ function addCliStack(stack: StackItem[], background: AnswerMap["techBackground"]
   ]);
 }
 
-function addEmbeddedStack(stack: StackItem[], background: AnswerMap["techBackground"]) {
+function addEmbeddedStack(stack: StackItem[], background: TechBackgroundOptionId) {
   if (background === "cpp" || background === "newLearner") {
     addStack(stack, [
       stackItem("C / C++", "平台：嵌入式或硬件", "硬件 SDK、驱动和实时约束通常以 C/C++ 为主。"),
@@ -418,7 +454,7 @@ function addEmbeddedStack(stack: StackItem[], background: AnswerMap["techBackgro
   ]);
 }
 
-function addWebStack(stack: StackItem[], background: AnswerMap["techBackground"], need: AnswerMap["projectNeed"]) {
+function addWebStack(stack: StackItem[], background: TechBackgroundOptionId, need: ProjectNeedOptionId) {
   if (background === "python") {
     if (need === "contentOnly") {
       addStack(stack, [
@@ -489,12 +525,14 @@ function addWebStack(stack: StackItem[], background: AnswerMap["techBackground"]
 
 function addPlatformStack(
   stack: StackItem[],
-  target: AnswerMap["deliveryTarget"],
-  background: AnswerMap["techBackground"],
-  need: AnswerMap["projectNeed"]
+  target: DeliveryTargetOptionId,
+  background: TechBackgroundOptionId,
+  needs: ProjectNeedOptionId[]
 ) {
+  const primaryNeed = pickPrimaryNeed(needs);
+
   if (target === "androidNative") {
-    addAndroidStack(stack, background, need);
+    addAndroidStack(stack, background, needs);
     return;
   }
 
@@ -523,21 +561,87 @@ function addPlatformStack(
     return;
   }
 
-  addWebStack(stack, background, need);
+  addWebStack(stack, background, primaryNeed);
+}
+
+function makeRouteStack(
+  target: DeliveryTargetOptionId,
+  background: TechBackgroundOptionId,
+  needs: ProjectNeedOptionId[]
+) {
+  const stack: StackItem[] = [];
+  addPlatformStack(stack, target, background, needs);
+  return uniqueStack(stack).slice(0, 5);
+}
+
+function createAlternateRoutes(
+  target: DeliveryTargetOptionId,
+  primaryBackground: TechBackgroundOptionId,
+  secondaryBackground: TechBackgroundOptionId | undefined,
+  needs: ProjectNeedOptionId[]
+): AlternateRoute[] {
+  const routes: AlternateRoute[] = [];
+
+  if (secondaryBackground) {
+    routes.push({
+      title: `备选背景：${backgroundLabel[secondaryBackground]}`,
+      summary: `同一平台和需求下，用 ${backgroundLabel[secondaryBackground]} 做第二条路线。适合你已有这方面资源，或想把部分模块交给另一套生态。`,
+      stack: makeRouteStack(target, secondaryBackground, needs)
+    });
+  }
+
+  if (target === "androidNative") {
+    routes.push({
+      title: "未来双端发布：跨平台 App",
+      summary: "如果 Android 之外很快要覆盖 iOS，可以把跨平台 App 作为第二路线；设备能力强时仍要预留原生调试成本。",
+      stack: makeRouteStack("crossPlatformApp", primaryBackground, needs)
+    });
+  }
+
+  if (target === "iosNative") {
+    routes.push({
+      title: "未来双端发布：跨平台 App",
+      summary: "如果团队不想长期维护两套原生客户端，可以比较 Flutter 或 React Native / Expo 的双端成本。",
+      stack: makeRouteStack("crossPlatformApp", primaryBackground, needs)
+    });
+  }
+
+  if (target === "webApp" && hasNeed(needs, "localTool")) {
+    routes.push({
+      title: "本地能力更重：桌面应用",
+      summary: "如果文件系统、离线处理、托盘、快捷键或安装包体验成为核心，可以把桌面应用作为备选平台。",
+      stack: makeRouteStack("desktopApp", primaryBackground, needs)
+    });
+  }
+
+  if (target === "desktopApp" && primaryBackground !== "cpp") {
+    routes.push({
+      title: "原生桌面路线：Qt / C++",
+      summary: "如果长期目标是本地性能、复杂控件和系统集成，Qt 6 + C++ 可以作为更原生的分支路线。",
+      stack: makeRouteStack("desktopApp", "cpp", needs)
+    });
+  }
+
+  return routes.slice(0, 2);
 }
 
 export function createRecommendation(answers: AnswerMap): Recommendation {
   const deliveryTarget = answers.deliveryTarget ?? "webApp";
-  const projectNeed = answers.projectNeed ?? "contentOnly";
+  const projectNeeds = normalizeProjectNeeds(answers.projectNeed);
+  const projectNeed = pickPrimaryNeed(projectNeeds);
   const expectedScale = answers.expectedScale ?? "small";
   const techBackground = answers.techBackground ?? "newLearner";
+  const secondaryTechBackground =
+    answers.secondaryTechBackground && answers.secondaryTechBackground !== techBackground
+      ? answers.secondaryTechBackground
+      : undefined;
 
   let routeTitle = "Web 应用技术栈";
-  let routeSummary = "先按目标平台确定主技术栈，再根据项目本质补上登录、存储、AI 或本地能力。";
-  let routeTag = "Platform first";
-  let nextMove = "先确认目标平台、第一版用户路径和必须接入的系统能力。";
+  let routeSummary = "先按目标平台确定主技术栈，再根据项目本质叠加登录、存储、AI、本地工具或设备能力。";
+  let routeTag = "Primary route";
+  let nextMove = "先确认主平台、第一版用户路径和必须接入的系统能力。";
   const todayTasks = [
-    "写清楚这个项目的运行平台、第一版核心能力和最小可交付范围。",
+    "写清楚这个项目的主平台、第一版核心能力和最小可交付范围。",
     "列出第一版必须出现的 3 个页面、窗口、命令或设备动作。",
     "删掉第一版不需要的技术能力，尤其是登录、数据库、复杂发布和多端同步。"
   ];
@@ -555,12 +659,12 @@ export function createRecommendation(answers: AnswerMap): Recommendation {
   const stack: StackItem[] = [];
   const decisionPath = [
     `运行平台：${targetLabel[deliveryTarget]}`,
-    `项目本质：${needLabel[projectNeed]}`,
+    `项目本质：${formatNeedLabels(projectNeeds)}`,
     `规模预期：${scaleLabel[expectedScale]}`,
-    `技术背景：${backgroundLabel[techBackground]}`
+    `技术背景：${formatBackgroundLabels(techBackground, secondaryTechBackground)}`
   ];
 
-  addPlatformStack(stack, deliveryTarget, techBackground, projectNeed);
+  addPlatformStack(stack, deliveryTarget, techBackground, projectNeeds);
 
   if (deliveryTarget === "androidNative") {
     routeTag = "Android native";
@@ -630,14 +734,14 @@ export function createRecommendation(answers: AnswerMap): Recommendation {
     }
   }
 
-  if (projectNeed === "contentOnly") {
+  if (hasNeed(projectNeeds, "contentOnly")) {
     stack.push(
       stackItem("内容结构 / 信息架构", "项目本质：展示内容", "先把内容、入口、详情和下一步行动整理清楚。")
     );
     todayTasks[1] = "确定首页、主界面或详情页，以及用户下一步行动入口。";
   }
 
-  if (projectNeed === "login") {
+  if (hasNeed(projectNeeds, "login")) {
     stack.push(
       stackItem("认证后端", "项目本质：需要用户登录", "登录意味着需要可信服务端边界，移动端和桌面端也不能只靠本地状态。"),
       stackItem("Token / Session 策略", "认证方案", "明确登录态刷新、过期、退出、设备丢失和权限校验。"),
@@ -647,7 +751,7 @@ export function createRecommendation(answers: AnswerMap): Recommendation {
     nextMove = "先画出公开路径、登录后路径和每类用户能看到的数据。";
   }
 
-  if (projectNeed === "storage") {
+  if (hasNeed(projectNeeds, "storage")) {
     stack.push(
       stackItem("PostgreSQL / SQLite / Room", "项目本质：需要持久化存储", "按平台选择服务端数据库或本地数据库，先定义数据模型和同步边界。"),
       stackItem("Schema / Migration", "数据访问层", "用 schema 和迁移管理字段变化，避免直接散写数据结构。"),
@@ -658,7 +762,7 @@ export function createRecommendation(answers: AnswerMap): Recommendation {
     nextMove = "先定义核心数据结构，再决定本地存储、托管数据库或后端服务。";
   }
 
-  if (projectNeed === "ai") {
+  if (hasNeed(projectNeeds, "ai")) {
     stack.push(
       stackItem("OpenAI API", "项目本质：需要 AI 能力", "负责生成、分析、总结、对话或结构化输出。"),
       stackItem("AI 调用封装", "AI 调用层", "统一封装模型调用、流式输出、超时、重试和错误处理。"),
@@ -669,7 +773,7 @@ export function createRecommendation(answers: AnswerMap): Recommendation {
     nextMove = "先做一个固定输入到固定输出的最小 AI 调用。";
   }
 
-  if (projectNeed === "localTool") {
+  if (hasNeed(projectNeeds, "localTool")) {
     stack.push(
       stackItem("本地配置保存", "项目本质：本地工具", "桌面、CLI 或本地 App 都需要稳定保存设置、路径和用户偏好。"),
       stackItem("文件 I/O 边界", "项目本质：本地工具", "明确读写目录、权限、备份、覆盖和错误恢复。")
@@ -677,7 +781,7 @@ export function createRecommendation(answers: AnswerMap): Recommendation {
     todayTasks[1] = "列出第一版要读写的本地文件、目录、配置和失败提示。";
   }
 
-  if (projectNeed === "nativeDevice") {
+  if (hasNeed(projectNeeds, "nativeDevice")) {
     stack.push(
       stackItem("权限处理", "项目本质：设备原生能力", "相机、定位、蓝牙、通知、USB 等能力都需要用户授权和失败兜底。"),
       stackItem("真机 / 真设备测试", "验证方式", "设备能力不能只在模拟器或理想环境里验证。")
@@ -741,6 +845,7 @@ export function createRecommendation(answers: AnswerMap): Recommendation {
     routeSummary,
     routeTag,
     decisionPath,
+    alternateRoutes: createAlternateRoutes(deliveryTarget, techBackground, secondaryTechBackground, projectNeeds),
     stack: uniqueStack(stack),
     todayTasks,
     weekTasks,

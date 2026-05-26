@@ -41,6 +41,7 @@ const queryKeys: Record<QuestionId, string> = {
   expectedScale: "scale",
   techBackground: "bg"
 };
+const secondaryTechBackgroundQueryKey = "bg2";
 
 interface SavedWizardState {
   answers: AnswerMap;
@@ -115,11 +116,19 @@ function cx(...classes: Array<string | false | null | undefined>) {
 }
 
 function getAnsweredCount(answers: AnswerMap) {
-  return questions.filter((question) => answers[question.id]).length;
+  return questions.filter((question) => isQuestionAnswered(answers, question.id)).length;
 }
 
 function isComplete(answers: AnswerMap) {
-  return questions.every((question) => Boolean(answers[question.id]));
+  return questions.every((question) => isQuestionAnswered(answers, question.id));
+}
+
+function isQuestionAnswered(answers: AnswerMap, questionId: QuestionId) {
+  if (questionId === "projectNeed") {
+    return Boolean(answers.projectNeed?.length);
+  }
+
+  return Boolean(answers[questionId]);
 }
 
 function isValidOption(questionId: QuestionId, optionId: string | null): optionId is OptionId {
@@ -132,14 +141,14 @@ function isValidOption(questionId: QuestionId, optionId: string | null): optionI
   );
 }
 
-function assignAnswer(answers: AnswerMap, questionId: QuestionId, optionId: OptionId) {
+function assignSingleAnswer(answers: AnswerMap, questionId: QuestionId, optionId: OptionId) {
   if (questionId === "deliveryTarget") {
     answers.deliveryTarget = optionId as DeliveryTargetOptionId;
     return;
   }
 
   if (questionId === "projectNeed") {
-    answers.projectNeed = optionId as ProjectNeedOptionId;
+    answers.projectNeed = [optionId as ProjectNeedOptionId];
     return;
   }
 
@@ -151,19 +160,113 @@ function assignAnswer(answers: AnswerMap, questionId: QuestionId, optionId: Opti
   answers.techBackground = optionId as TechBackgroundOptionId;
 }
 
-function normalizeLegacyAnswers(answers: AnswerMap) {
-  if (!answers.deliveryTarget && (answers.projectNeed || answers.expectedScale || answers.techBackground)) {
-    return { ...answers, deliveryTarget: "webApp" as DeliveryTargetOptionId };
+function normalizeNeedList(needs: ProjectNeedOptionId[] | undefined) {
+  return needs?.length ? Array.from(new Set(needs)) : undefined;
+}
+
+function toValidOption(questionId: QuestionId, value: unknown) {
+  return typeof value === "string" && isValidOption(questionId, value) ? value : undefined;
+}
+
+function toValidNeeds(value: unknown) {
+  if (Array.isArray(value)) {
+    return normalizeNeedList(
+      value.filter((item): item is ProjectNeedOptionId => toValidOption("projectNeed", item) !== undefined)
+    );
   }
 
-  return answers;
+  const optionId = toValidOption("projectNeed", value);
+
+  return optionId ? [optionId as ProjectNeedOptionId] : undefined;
+}
+
+function normalizeLegacyAnswers(answers: AnswerMap) {
+  const normalizedAnswers: AnswerMap = {
+    ...answers,
+    projectNeed: normalizeNeedList(answers.projectNeed)
+  };
+
+  if (
+    normalizedAnswers.secondaryTechBackground &&
+    normalizedAnswers.secondaryTechBackground === normalizedAnswers.techBackground
+  ) {
+    delete normalizedAnswers.secondaryTechBackground;
+  }
+
+  if (
+    !normalizedAnswers.deliveryTarget &&
+    (normalizedAnswers.projectNeed || normalizedAnswers.expectedScale || normalizedAnswers.techBackground)
+  ) {
+    return { ...normalizedAnswers, deliveryTarget: "webApp" as DeliveryTargetOptionId };
+  }
+
+  return normalizedAnswers;
 }
 
 function withAnswer(answers: AnswerMap, questionId: QuestionId, optionId: OptionId) {
   const nextAnswers: AnswerMap = { ...answers };
-  assignAnswer(nextAnswers, questionId, optionId);
+
+  if (questionId === "projectNeed") {
+    const needId = optionId as ProjectNeedOptionId;
+    const currentNeeds = nextAnswers.projectNeed ?? [];
+    const projectNeed = currentNeeds.includes(needId)
+      ? currentNeeds.filter((item) => item !== needId)
+      : [...currentNeeds, needId];
+
+    nextAnswers.projectNeed = projectNeed.length ? projectNeed : undefined;
+    return nextAnswers;
+  }
+
+  if (questionId === "techBackground") {
+    const backgroundId = optionId as TechBackgroundOptionId;
+
+    if (nextAnswers.techBackground === backgroundId) {
+      if (nextAnswers.secondaryTechBackground) {
+        nextAnswers.techBackground = nextAnswers.secondaryTechBackground;
+        delete nextAnswers.secondaryTechBackground;
+      } else {
+        delete nextAnswers.techBackground;
+      }
+
+      return nextAnswers;
+    }
+
+    if (nextAnswers.secondaryTechBackground === backgroundId) {
+      delete nextAnswers.secondaryTechBackground;
+      return nextAnswers;
+    }
+
+    if (!nextAnswers.techBackground) {
+      nextAnswers.techBackground = backgroundId;
+      return nextAnswers;
+    }
+
+    nextAnswers.secondaryTechBackground = backgroundId;
+    return nextAnswers;
+  }
+
+  assignSingleAnswer(nextAnswers, questionId, optionId);
 
   return nextAnswers;
+}
+
+function getOption(questionId: QuestionId, optionId: OptionId | undefined) {
+  const question = questions.find((item) => item.id === questionId);
+
+  return question?.options.find((item) => item.id === optionId);
+}
+
+function getNeedOptionsFromValue(value: string | null) {
+  if (!value) {
+    return undefined;
+  }
+
+  const needs = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item): item is ProjectNeedOptionId => isValidOption("projectNeed", item));
+
+  return normalizeNeedList(needs);
 }
 
 function parseAnswersFromSearch(search: string) {
@@ -173,10 +276,21 @@ function parseAnswersFromSearch(search: string) {
   questions.forEach((question) => {
     const value = params.get(queryKeys[question.id]);
 
+    if (question.id === "projectNeed") {
+      parsedAnswers.projectNeed = getNeedOptionsFromValue(value);
+      return;
+    }
+
     if (isValidOption(question.id, value)) {
-      assignAnswer(parsedAnswers, question.id, value);
+      assignSingleAnswer(parsedAnswers, question.id, value);
     }
   });
+
+  const secondaryBackground = params.get(secondaryTechBackgroundQueryKey);
+
+  if (isValidOption("techBackground", secondaryBackground)) {
+    parsedAnswers.secondaryTechBackground = secondaryBackground as TechBackgroundOptionId;
+  }
 
   return normalizeLegacyAnswers(parsedAnswers);
 }
@@ -190,16 +304,29 @@ function readSavedState(): SavedWizardState | null {
     }
 
     const parsed = JSON.parse(rawState) as Partial<SavedWizardState>;
+    const savedAnswers = parsed.answers as Record<string, unknown> | undefined;
     const answers: AnswerMap = {};
 
     questions.forEach((question) => {
-      const optionId = parsed.answers?.[question.id];
-      const candidate = optionId ?? null;
+      const rawAnswer = savedAnswers?.[question.id];
 
-      if (isValidOption(question.id, candidate)) {
-        assignAnswer(answers, question.id, candidate);
+      if (question.id === "projectNeed") {
+        answers.projectNeed = toValidNeeds(rawAnswer);
+        return;
+      }
+
+      const optionId = toValidOption(question.id, rawAnswer);
+
+      if (optionId) {
+        assignSingleAnswer(answers, question.id, optionId);
       }
     });
+
+    const secondaryBackground = toValidOption("techBackground", savedAnswers?.secondaryTechBackground);
+
+    if (secondaryBackground) {
+      answers.secondaryTechBackground = secondaryBackground as TechBackgroundOptionId;
+    }
 
     const normalizedAnswers = normalizeLegacyAnswers(answers);
 
@@ -246,11 +373,84 @@ function saveWizardState(state: SavedWizardState) {
 }
 
 function getAnswerLabel(questionId: QuestionId, answers: AnswerMap) {
-  const optionId = answers[questionId];
-  const question = questions.find((item) => item.id === questionId);
-  const option = question?.options.find((item) => item.id === optionId);
+  if (questionId === "projectNeed") {
+    return answers.projectNeed?.map((optionId) => getOption("projectNeed", optionId)?.label).filter(Boolean).join(" + ") || "未选择";
+  }
+
+  if (questionId === "techBackground") {
+    const primaryLabel = answers.techBackground ? getOption("techBackground", answers.techBackground)?.label : undefined;
+    const secondaryLabel = answers.secondaryTechBackground
+      ? getOption("techBackground", answers.secondaryTechBackground)?.label
+      : undefined;
+
+    if (primaryLabel && secondaryLabel) {
+      return `${primaryLabel} + ${secondaryLabel}`;
+    }
+
+    return primaryLabel ?? "未选择";
+  }
+
+  const optionId = answers[questionId] as OptionId | undefined;
+  const option = getOption(questionId, optionId);
 
   return option?.label ?? "未选择";
+}
+
+function getAnswerShortLabel(questionId: QuestionId, answers: AnswerMap) {
+  if (questionId === "projectNeed") {
+    const needs = answers.projectNeed ?? [];
+
+    if (!needs.length) {
+      return "待装配";
+    }
+
+    if (needs.length > 2) {
+      return `${getOption("projectNeed", needs[0])?.shortLabel ?? "已选"} +${needs.length - 1}`;
+    }
+
+    return needs.map((optionId) => getOption("projectNeed", optionId)?.shortLabel).filter(Boolean).join(" + ");
+  }
+
+  if (questionId === "techBackground") {
+    const primary = answers.techBackground ? getOption("techBackground", answers.techBackground)?.shortLabel : undefined;
+    const secondary = answers.secondaryTechBackground
+      ? getOption("techBackground", answers.secondaryTechBackground)?.shortLabel
+      : undefined;
+
+    return primary && secondary ? `${primary} + ${secondary}` : primary ?? "待装配";
+  }
+
+  const optionId = answers[questionId] as OptionId | undefined;
+
+  return optionId ? getOption(questionId, optionId)?.shortLabel ?? "已选择" : "待装配";
+}
+
+function isOptionSelected(questionId: QuestionId, optionId: OptionId, answers: AnswerMap) {
+  if (questionId === "projectNeed") {
+    return answers.projectNeed?.includes(optionId as ProjectNeedOptionId) ?? false;
+  }
+
+  if (questionId === "techBackground") {
+    return answers.techBackground === optionId || answers.secondaryTechBackground === optionId;
+  }
+
+  return answers[questionId] === optionId;
+}
+
+function getOptionRoleLabel(questionId: QuestionId, optionId: OptionId, answers: AnswerMap) {
+  if (questionId === "techBackground") {
+    if (answers.techBackground === optionId) {
+      return "主背景";
+    }
+
+    if (answers.secondaryTechBackground === optionId) {
+      return "备选";
+    }
+
+    return undefined;
+  }
+
+  return isOptionSelected(questionId, optionId, answers) ? "已选" : undefined;
 }
 
 function createShareUrl(answers: AnswerMap) {
@@ -258,10 +458,30 @@ function createShareUrl(answers: AnswerMap) {
   const params = new URLSearchParams();
 
   questions.forEach((question) => {
+    if (question.id === "projectNeed") {
+      if (answers.projectNeed?.length) {
+        params.set(queryKeys[question.id], answers.projectNeed.join(","));
+      }
+
+      return;
+    }
+
+    if (question.id === "techBackground") {
+      if (answers.techBackground) {
+        params.set(queryKeys[question.id], answers.techBackground);
+      }
+
+      if (answers.secondaryTechBackground) {
+        params.set(secondaryTechBackgroundQueryKey, answers.secondaryTechBackground);
+      }
+
+      return;
+    }
+
     const answer = answers[question.id];
 
     if (answer) {
-      params.set(queryKeys[question.id], answer);
+      params.set(queryKeys[question.id], answer as string);
     }
   });
 
@@ -276,6 +496,16 @@ function formatList(items: string[]) {
 
 function formatStack(items: StackItem[]) {
   return items.map((item) => `- ${item.label}（${item.source}）：${item.reason}`).join("\n");
+}
+
+function formatAlternateRoutes(routes: Recommendation["alternateRoutes"]) {
+  if (!routes.length) {
+    return "- 当前选择已经足够聚焦，暂不需要额外分支路线。";
+  }
+
+  return routes
+    .map((route) => `### ${route.title}\n${route.summary}\n\n${formatStack(route.stack)}`)
+    .join("\n\n");
 }
 
 function createResultMarkdown(answers: AnswerMap, recommendation: Recommendation) {
@@ -298,6 +528,9 @@ ${recommendation.routeSummary}
 
 ## 推荐工具箱
 ${formatStack(recommendation.stack)}
+
+## 备选路线
+${formatAlternateRoutes(recommendation.alternateRoutes)}
 
 ## 今天开始
 ${formatList(recommendation.todayTasks)}
@@ -396,6 +629,41 @@ function StackToolbox({ items }: { items: StackItem[] }) {
   );
 }
 
+function AlternateRoutes({ routes }: { routes: Recommendation["alternateRoutes"] }) {
+  return (
+    <section className="toy-alt-routes">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="toy-kicker">Alternate Routes</p>
+          <h3 className="text-lg font-black text-[#172033]">备选路线</h3>
+        </div>
+        <span className="toy-counter">{routes.length || 1} 条</span>
+      </div>
+
+      {routes.length ? (
+        <div className="toy-alt-grid mt-4">
+          {routes.map((route) => (
+            <article className="toy-alt-card" key={route.title}>
+              <div>
+                <p className="toy-alt-label">Plan B</p>
+                <h4>{route.title}</h4>
+                <p>{route.summary}</p>
+              </div>
+              <div className="toy-alt-stack" aria-label={`${route.title} 工具箱`}>
+                {route.stack.map((item) => (
+                  <span key={`${route.title}-${item.source}-${item.label}`}>{item.label}</span>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="toy-alt-empty mt-4">当前选择已经足够聚焦，暂不需要额外分支路线。</p>
+      )}
+    </section>
+  );
+}
+
 function DecisionPath({ items }: { items: string[] }) {
   return (
     <section className="toy-decision-path" aria-label="四问决策路径">
@@ -444,10 +712,12 @@ function WorkshopAction({
 function OptionButton({
   option,
   selected,
+  badge,
   onClick
 }: {
   option: DecisionOption;
   selected: boolean;
+  badge?: string;
   onClick: () => void;
 }) {
   const Icon = optionIcons[option.id] ?? Sparkles;
@@ -470,7 +740,10 @@ function OptionButton({
       </span>
       <span className="mt-5 block text-lg font-black text-[#172033]">{option.label}</span>
       <span className="mt-3 block text-sm leading-6 text-[#334155]">{option.description}</span>
-      <span className="toy-label-tape mt-auto">{option.signal}</span>
+      <span className="mt-auto flex flex-wrap items-end gap-2 pt-4">
+        <span className="toy-label-tape">{option.signal}</span>
+        {badge ? <span className="toy-option-badge">{badge}</span> : null}
+      </span>
     </button>
   );
 }
@@ -480,20 +753,17 @@ function StepButton({
   index,
   active,
   done,
-  answer,
+  answerLabel,
   onClick
 }: {
   question: (typeof questions)[number];
   index: number;
   active: boolean;
   done: boolean;
-  answer?: OptionId;
+  answerLabel: string;
   onClick: () => void;
 }) {
   const accent = stepAccents[index % stepAccents.length];
-  const answerLabel = answer
-    ? question.options.find((option) => option.id === answer)?.shortLabel ?? "已选择"
-    : "待装配";
 
   return (
     <button
@@ -584,7 +854,7 @@ export default function DecisionWizard() {
   const answeredCount = getAnsweredCount(answers);
   const progress = Math.round((answeredCount / questions.length) * 100);
   const isLastStep = step === questions.length - 1;
-  const currentAnswer = answers[question.id];
+  const currentQuestionAnswered = isQuestionAnswered(answers, question.id);
   const recommendation = useMemo(() => createRecommendation(answers), [answers]);
   const resultMarkdown = useMemo(() => createResultMarkdown(answers, recommendation), [answers, recommendation]);
 
@@ -622,7 +892,7 @@ export default function DecisionWizard() {
   }
 
   function goNext() {
-    if (!currentAnswer) {
+    if (!currentQuestionAnswered) {
       return;
     }
 
@@ -719,8 +989,8 @@ export default function DecisionWizard() {
               {questions.map((item, index) => (
                 <StepButton
                   active={!showResult && index === step}
-                  answer={answers[item.id]}
-                  done={Boolean(answers[item.id])}
+                  answerLabel={getAnswerShortLabel(item.id, answers)}
+                  done={isQuestionAnswered(answers, item.id)}
                   index={index}
                   key={item.id}
                   onClick={() => {
@@ -753,10 +1023,11 @@ export default function DecisionWizard() {
                 <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {question.options.map((option) => (
                     <OptionButton
+                      badge={getOptionRoleLabel(question.id, option.id, answers)}
                       key={option.id}
                       onClick={() => selectOption(question.id, option.id)}
                       option={option}
-                      selected={currentAnswer === option.id}
+                      selected={isOptionSelected(question.id, option.id, answers)}
                     />
                   ))}
                 </div>
@@ -766,7 +1037,7 @@ export default function DecisionWizard() {
                     <ArrowLeft className="h-4 w-4" aria-hidden="true" />
                     上一步
                   </WorkshopAction>
-                  <WorkshopAction disabled={!currentAnswer} onClick={goNext} tone="primary">
+                  <WorkshopAction disabled={!currentQuestionAnswered} onClick={goNext} tone="primary">
                     {isLastStep ? "生成技术栈" : "下一步"}
                     <ArrowRight className="h-4 w-4" aria-hidden="true" />
                   </WorkshopAction>
@@ -812,6 +1083,10 @@ export default function DecisionWizard() {
 
                 <div className="mt-5">
                   <StackToolbox items={recommendation.stack} />
+                </div>
+
+                <div className="mt-5">
+                  <AlternateRoutes routes={recommendation.alternateRoutes} />
                 </div>
 
                 <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
