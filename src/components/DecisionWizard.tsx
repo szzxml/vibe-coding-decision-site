@@ -7,36 +7,108 @@ import {
   ClipboardCheck,
   Code2,
   Compass,
+  Copy,
+  Download,
   Layers3,
+  Link2,
   RefreshCcw,
   Rocket,
   ShieldAlert,
   Sparkles
 } from "lucide-react";
-import type { ComponentType } from "react";
-import { useMemo, useState } from "react";
+import type { ComponentType, CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createRecommendation, questions } from "@/lib/decision-data";
-import type { AnswerMap, DecisionOption, QuestionId } from "@/types/decision";
+import type {
+  AnswerMap,
+  DecisionOption,
+  DeliveryTargetOptionId,
+  ExpectedScaleOptionId,
+  OptionId,
+  ProjectNeedOptionId,
+  QuestionId,
+  Recommendation,
+  StackItem,
+  TechBackgroundOptionId
+} from "@/types/decision";
 
-const optionIcons: Record<string, ComponentType<{ className?: string }>> = {
-  site: Sparkles,
-  tool: ClipboardCheck,
-  saas: Layers3,
-  content: Compass,
-  automation: Code2,
-  idea: Sparkles,
-  draft: ClipboardCheck,
-  prototype: Layers3,
-  ready: Rocket,
-  beginner: Compass,
-  editor: ClipboardCheck,
-  builder: Code2,
-  validate: Rocket,
-  visual: Sparkles,
-  complete: Layers3,
-  cost: ShieldAlert
+const storageKey = "vibe-coding-decision-state";
+
+const queryKeys: Record<QuestionId, string> = {
+  deliveryTarget: "target",
+  projectNeed: "need",
+  expectedScale: "scale",
+  techBackground: "bg"
 };
+
+interface SavedWizardState {
+  answers: AnswerMap;
+  showResult: boolean;
+  step: number;
+}
+
+interface ToyTheme {
+  accent: string;
+  deep: string;
+  tint: string;
+}
+
+const emptyWizardState: SavedWizardState = {
+  answers: {},
+  showResult: false,
+  step: 0
+};
+
+const optionIcons: Record<OptionId, ComponentType<{ className?: string }>> = {
+  webApp: Compass,
+  desktopApp: Code2,
+  androidNative: Rocket,
+  iosNative: Sparkles,
+  crossPlatformApp: Layers3,
+  cliTool: ClipboardCheck,
+  embeddedApp: ShieldAlert,
+  contentOnly: Compass,
+  login: ClipboardCheck,
+  storage: Layers3,
+  ai: Sparkles,
+  localTool: Code2,
+  nativeDevice: Rocket,
+  small: Rocket,
+  medium: Layers3,
+  large: ShieldAlert,
+  javascript: Code2,
+  python: ClipboardCheck,
+  cpp: ShieldAlert,
+  java: Rocket,
+  newLearner: Compass
+};
+
+const optionThemes: Record<OptionId, ToyTheme> = {
+  webApp: { accent: "#2563eb", deep: "#172554", tint: "#dbeafe" },
+  desktopApp: { accent: "#0f9f7a", deep: "#064e3b", tint: "#d8f5ea" },
+  androidNative: { accent: "#14b8a6", deep: "#134e4a", tint: "#ccfbf1" },
+  iosNative: { accent: "#ef4444", deep: "#7f1d1d", tint: "#ffe2dc" },
+  crossPlatformApp: { accent: "#f97316", deep: "#7c2d12", tint: "#ffedd5" },
+  cliTool: { accent: "#f4c430", deep: "#713f12", tint: "#fff3bf" },
+  embeddedApp: { accent: "#334155", deep: "#0f172a", tint: "#e2e8f0" },
+  contentOnly: { accent: "#f4c430", deep: "#713f12", tint: "#fff3bf" },
+  login: { accent: "#2563eb", deep: "#172554", tint: "#dbeafe" },
+  storage: { accent: "#0f9f7a", deep: "#064e3b", tint: "#d8f5ea" },
+  ai: { accent: "#ef4444", deep: "#7f1d1d", tint: "#ffe2dc" },
+  localTool: { accent: "#f97316", deep: "#7c2d12", tint: "#ffedd5" },
+  nativeDevice: { accent: "#14b8a6", deep: "#134e4a", tint: "#ccfbf1" },
+  small: { accent: "#14b8a6", deep: "#134e4a", tint: "#ccfbf1" },
+  medium: { accent: "#f97316", deep: "#7c2d12", tint: "#ffedd5" },
+  large: { accent: "#ef4444", deep: "#7f1d1d", tint: "#ffe2dc" },
+  javascript: { accent: "#2563eb", deep: "#172554", tint: "#dbeafe" },
+  python: { accent: "#0f9f7a", deep: "#064e3b", tint: "#d8f5ea" },
+  cpp: { accent: "#334155", deep: "#0f172a", tint: "#e2e8f0" },
+  java: { accent: "#ef4444", deep: "#7f1d1d", tint: "#ffe2dc" },
+  newLearner: { accent: "#f4c430", deep: "#713f12", tint: "#fff3bf" }
+};
+
+const stepAccents = ["#ef4444", "#2563eb", "#f4c430", "#0f9f7a"];
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -46,19 +118,326 @@ function getAnsweredCount(answers: AnswerMap) {
   return questions.filter((question) => answers[question.id]).length;
 }
 
-function TaskList({ title, items }: { title: string; items: string[] }) {
+function isComplete(answers: AnswerMap) {
+  return questions.every((question) => Boolean(answers[question.id]));
+}
+
+function isValidOption(questionId: QuestionId, optionId: string | null): optionId is OptionId {
+  if (!optionId) {
+    return false;
+  }
+
+  return questions.some(
+    (question) => question.id === questionId && question.options.some((option) => option.id === optionId)
+  );
+}
+
+function assignAnswer(answers: AnswerMap, questionId: QuestionId, optionId: OptionId) {
+  if (questionId === "deliveryTarget") {
+    answers.deliveryTarget = optionId as DeliveryTargetOptionId;
+    return;
+  }
+
+  if (questionId === "projectNeed") {
+    answers.projectNeed = optionId as ProjectNeedOptionId;
+    return;
+  }
+
+  if (questionId === "expectedScale") {
+    answers.expectedScale = optionId as ExpectedScaleOptionId;
+    return;
+  }
+
+  answers.techBackground = optionId as TechBackgroundOptionId;
+}
+
+function normalizeLegacyAnswers(answers: AnswerMap) {
+  if (!answers.deliveryTarget && (answers.projectNeed || answers.expectedScale || answers.techBackground)) {
+    return { ...answers, deliveryTarget: "webApp" as DeliveryTargetOptionId };
+  }
+
+  return answers;
+}
+
+function withAnswer(answers: AnswerMap, questionId: QuestionId, optionId: OptionId) {
+  const nextAnswers: AnswerMap = { ...answers };
+  assignAnswer(nextAnswers, questionId, optionId);
+
+  return nextAnswers;
+}
+
+function parseAnswersFromSearch(search: string) {
+  const params = new URLSearchParams(search);
+  const parsedAnswers: AnswerMap = {};
+
+  questions.forEach((question) => {
+    const value = params.get(queryKeys[question.id]);
+
+    if (isValidOption(question.id, value)) {
+      assignAnswer(parsedAnswers, question.id, value);
+    }
+  });
+
+  return normalizeLegacyAnswers(parsedAnswers);
+}
+
+function readSavedState(): SavedWizardState | null {
+  try {
+    const rawState = window.localStorage.getItem(storageKey);
+
+    if (!rawState) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawState) as Partial<SavedWizardState>;
+    const answers: AnswerMap = {};
+
+    questions.forEach((question) => {
+      const optionId = parsed.answers?.[question.id];
+      const candidate = optionId ?? null;
+
+      if (isValidOption(question.id, candidate)) {
+        assignAnswer(answers, question.id, candidate);
+      }
+    });
+
+    const normalizedAnswers = normalizeLegacyAnswers(answers);
+
+    return {
+      answers: normalizedAnswers,
+      showResult: Boolean(parsed.showResult) && isComplete(normalizedAnswers),
+      step:
+        typeof parsed.step === "number"
+          ? Math.min(Math.max(parsed.step, 0), questions.length - 1)
+          : Math.min(getAnsweredCount(normalizedAnswers), questions.length - 1)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getInitialWizardState(): SavedWizardState {
+  if (typeof window === "undefined") {
+    return emptyWizardState;
+  }
+
+  const urlAnswers = parseAnswersFromSearch(window.location.search);
+  const urlAnswerCount = getAnsweredCount(urlAnswers);
+
+  if (urlAnswerCount > 0) {
+    return {
+      answers: urlAnswers,
+      showResult: isComplete(urlAnswers),
+      step: Math.min(urlAnswerCount, questions.length - 1)
+    };
+  }
+
+  return readSavedState() ?? emptyWizardState;
+}
+
+function saveWizardState(state: SavedWizardState) {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(state));
+  } catch {
+    return false;
+  }
+
+  return true;
+}
+
+function getAnswerLabel(questionId: QuestionId, answers: AnswerMap) {
+  const optionId = answers[questionId];
+  const question = questions.find((item) => item.id === questionId);
+  const option = question?.options.find((item) => item.id === optionId);
+
+  return option?.label ?? "未选择";
+}
+
+function createShareUrl(answers: AnswerMap) {
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams();
+
+  questions.forEach((question) => {
+    const answer = answers[question.id];
+
+    if (answer) {
+      params.set(queryKeys[question.id], answer);
+    }
+  });
+
+  url.search = params.toString();
+
+  return url.toString();
+}
+
+function formatList(items: string[]) {
+  return items.map((item) => `- ${item}`).join("\n");
+}
+
+function formatStack(items: StackItem[]) {
+  return items.map((item) => `- ${item.label}（${item.source}）：${item.reason}`).join("\n");
+}
+
+function createResultMarkdown(answers: AnswerMap, recommendation: Recommendation) {
+  const answerSummary = questions
+    .map((question) => `- ${question.eyebrow}: ${getAnswerLabel(question.id, answers)}`)
+    .join("\n");
+
+  return `# Vibe Coding 技术栈决策
+
+## 你的选择
+${answerSummary}
+
+## 决策路径
+${formatList(recommendation.decisionPath)}
+
+## 推荐技术栈
+${recommendation.routeTitle}
+
+${recommendation.routeSummary}
+
+## 推荐工具箱
+${formatStack(recommendation.stack)}
+
+## 今天开始
+${formatList(recommendation.todayTasks)}
+
+## 本周完成
+${formatList(recommendation.weekTasks)}
+
+## 上线前检查
+${formatList(recommendation.launchChecks)}
+
+## 风险提醒
+${formatList(recommendation.risks)}
+
+## 下一步
+${recommendation.nextMove}
+`;
+}
+
+async function writeClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+function downloadMarkdown(markdown: string) {
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = "vibe-coding-stack-decision.md";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function getToyStyle(theme: ToyTheme): CSSProperties {
+  return {
+    "--toy-accent": theme.accent,
+    "--toy-deep": theme.deep,
+    "--toy-tint": theme.tint
+  } as CSSProperties;
+}
+
+function TaskList({ title, items, accent }: { title: string; items: string[]; accent: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
-      <ul className="mt-3 space-y-2">
+    <section className="toy-task-card" style={{ "--toy-accent": accent } as CSSProperties}>
+      <div className="flex items-center gap-2">
+        <span className="toy-mini-light" aria-hidden="true" />
+        <h3 className="text-sm font-black text-[#172033]">{title}</h3>
+      </div>
+      <ul className="mt-4 space-y-3">
         {items.map((item) => (
-          <li className="flex gap-2 text-sm leading-6 text-slate-650" key={item}>
-            <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+          <li className="flex gap-2 text-sm leading-6 text-[#334155]" key={item}>
+            <Check className="mt-1 h-4 w-4 shrink-0 text-[var(--toy-accent)]" aria-hidden="true" />
             <span>{item}</span>
           </li>
         ))}
       </ul>
-    </div>
+    </section>
+  );
+}
+
+function StackToolbox({ items }: { items: StackItem[] }) {
+  return (
+    <section className="toy-toolbox">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="toy-kicker">Matched Kit</p>
+          <h3 className="text-lg font-black text-[#172033]">推荐工具箱</h3>
+        </div>
+        <span className="toy-counter">{items.length} 件</span>
+      </div>
+      <div className="toy-stack-grid mt-4">
+        {items.map((item) => (
+          <article className="toy-stack-card" key={`${item.source}-${item.label}`}>
+            <span className="toy-stack-source">{item.source}</span>
+            <h4>{item.label}</h4>
+            <p>{item.reason}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DecisionPath({ items }: { items: string[] }) {
+  return (
+    <section className="toy-decision-path" aria-label="四问决策路径">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="toy-kicker">Decision Path</p>
+          <h3 className="text-lg font-black text-[#172033]">四问决策路径</h3>
+        </div>
+        <span className="toy-counter">{items.length} 问</span>
+      </div>
+      <ol className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {items.map((item, index) => (
+          <li className="toy-path-step" key={item} style={{ "--toy-accent": stepAccents[index] } as CSSProperties}>
+            <span>{index + 1}</span>
+            <p>{item}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function WorkshopAction({
+  children,
+  disabled,
+  onClick,
+  tone = "plain"
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+  tone?: "plain" | "primary" | "danger";
+}) {
+  return (
+    <button
+      className={cx("toy-action", tone === "primary" && "toy-action-primary", tone === "danger" && "toy-action-danger")}
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -72,57 +451,174 @@ function OptionButton({
   onClick: () => void;
 }) {
   const Icon = optionIcons[option.id] ?? Sparkles;
+  const theme = optionThemes[option.id];
 
   return (
     <button
-      className={cx(
-        "group flex min-h-36 w-full flex-col rounded-lg border p-4 text-left transition",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600",
-        selected
-          ? "border-teal-600 bg-teal-50 shadow-sm"
-          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-      )}
+      className={cx("toy-option", selected && "is-selected")}
       onClick={onClick}
+      style={getToyStyle(theme)}
       type="button"
     >
-      <span className="flex items-center justify-between gap-3">
-        <span
-          className={cx(
-            "grid h-10 w-10 shrink-0 place-items-center rounded-lg border",
-            selected ? "border-teal-200 bg-white text-teal-700" : "border-slate-200 bg-slate-50 text-slate-700"
-          )}
-        >
+      <span className="flex items-start justify-between gap-3">
+        <span className="toy-option-icon">
           <Icon className="h-5 w-5" aria-hidden="true" />
         </span>
-        <span
-          className={cx(
-            "grid h-6 w-6 shrink-0 place-items-center rounded-full border",
-            selected ? "border-teal-600 bg-teal-600 text-white" : "border-slate-300 text-transparent"
-          )}
-        >
-          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+        <span className="toy-check-slot">
+          {selected ? <Check className="h-4 w-4" aria-hidden="true" /> : <span className="toy-empty-screw" />}
         </span>
       </span>
-      <span className="mt-4 text-base font-semibold text-slate-950">{option.label}</span>
-      <span className="mt-2 text-sm leading-6 text-slate-650">{option.description}</span>
-      <span className="mt-auto pt-4 text-xs font-medium uppercase text-slate-500">{option.signal}</span>
+      <span className="mt-5 block text-lg font-black text-[#172033]">{option.label}</span>
+      <span className="mt-3 block text-sm leading-6 text-[#334155]">{option.description}</span>
+      <span className="toy-label-tape mt-auto">{option.signal}</span>
     </button>
   );
 }
 
+function StepButton({
+  question,
+  index,
+  active,
+  done,
+  answer,
+  onClick
+}: {
+  question: (typeof questions)[number];
+  index: number;
+  active: boolean;
+  done: boolean;
+  answer?: OptionId;
+  onClick: () => void;
+}) {
+  const accent = stepAccents[index % stepAccents.length];
+  const answerLabel = answer
+    ? question.options.find((option) => option.id === answer)?.shortLabel ?? "已选择"
+    : "待装配";
+
+  return (
+    <button
+      className={cx("toy-step", active && "is-active", done && "is-done")}
+      onClick={onClick}
+      style={{ "--toy-accent": accent } as CSSProperties}
+      type="button"
+    >
+      <span className="toy-step-index">{done ? <Check className="h-4 w-4" aria-hidden="true" /> : index + 1}</span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-black text-[#172033]">{question.eyebrow}</span>
+        <span className="block truncate text-xs font-semibold text-[#64748b]">{answerLabel}</span>
+      </span>
+    </button>
+  );
+}
+
+function SideTray({
+  answers,
+  actionFeedback,
+  progress,
+  recommendation,
+  showResult
+}: {
+  answers: AnswerMap;
+  actionFeedback: string | null;
+  progress: number;
+  recommendation: Recommendation;
+  showResult: boolean;
+}) {
+  return (
+    <aside className="toy-side-tray">
+      <section className="toy-side-section">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-black text-[#172033]">装配进度</p>
+          <span className="toy-counter">{progress}%</span>
+        </div>
+        <div className="toy-ruler mt-4" aria-hidden="true">
+          <span style={{ width: `${progress}%` }} />
+        </div>
+        {actionFeedback ? <p className="toy-feedback mt-4">{actionFeedback}</p> : null}
+      </section>
+
+      <section className="toy-side-section">
+        <p className="text-sm font-black text-[#172033]">{showResult ? "推荐工具箱" : "已选零件"}</p>
+        {showResult ? (
+          <div className="mt-3 space-y-2">
+            {recommendation.stack.map((item) => (
+              <div className="toy-token" key={`${item.source}-${item.label}`}>
+                <span>{item.label}</span>
+                <small>{item.source}</small>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {questions.map((question, index) => (
+              <div className="toy-answer-row" key={question.id}>
+                <span className="toy-answer-dot" style={{ background: stepAccents[index % stepAccents.length] }} />
+                <span className="min-w-0 truncate">{question.eyebrow}</span>
+                <span className="ml-auto max-w-24 truncate font-black text-[#172033]">
+                  {getAnswerLabel(question.id, answers)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="toy-side-section hidden lg:block">
+        <p className="text-sm font-black text-[#172033]">工位状态</p>
+        <div className="mt-3 grid grid-cols-3 gap-2" aria-hidden="true">
+          <span className="toy-worklight bg-[#ef4444]" />
+          <span className="toy-worklight bg-[#f4c430]" />
+          <span className="toy-worklight bg-[#0f9f7a]" />
+        </div>
+      </section>
+    </aside>
+  );
+}
+
 export default function DecisionWizard() {
-  const [answers, setAnswers] = useState<AnswerMap>({});
-  const [step, setStep] = useState(0);
-  const [showResult, setShowResult] = useState(false);
+  const [wizardState, setWizardState] = useState<SavedWizardState>(emptyWizardState);
+  const hasRestoredState = useRef(false);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const { answers, showResult, step } = wizardState;
   const question = questions[step];
   const answeredCount = getAnsweredCount(answers);
   const progress = Math.round((answeredCount / questions.length) * 100);
   const isLastStep = step === questions.length - 1;
   const currentAnswer = answers[question.id];
   const recommendation = useMemo(() => createRecommendation(answers), [answers]);
+  const resultMarkdown = useMemo(() => createResultMarkdown(answers, recommendation), [answers, recommendation]);
+
+  useEffect(() => {
+    window.queueMicrotask(() => {
+      setWizardState(getInitialWizardState());
+      hasRestoredState.current = true;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!hasRestoredState.current) {
+      return;
+    }
+
+    saveWizardState(wizardState);
+  }, [wizardState]);
+
+  useEffect(() => {
+    if (!actionFeedback) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => setActionFeedback(null), 2200);
+
+    return () => window.clearTimeout(timerId);
+  }, [actionFeedback]);
 
   function selectOption(questionId: QuestionId, optionId: DecisionOption["id"]) {
-    setAnswers((current) => ({ ...current, [questionId]: optionId }));
+    setWizardState((current) => ({
+      ...current,
+      answers: withAnswer(current.answers, questionId, optionId)
+    }));
+    setActionFeedback("已放入工作台");
   }
 
   function goNext() {
@@ -131,119 +627,130 @@ export default function DecisionWizard() {
     }
 
     if (isLastStep) {
-      setShowResult(true);
+      setWizardState((current) => ({ ...current, showResult: true }));
+      setActionFeedback("技术栈已装配完成");
       return;
     }
 
-    setStep((current) => Math.min(current + 1, questions.length - 1));
+    setWizardState((current) => ({ ...current, step: Math.min(current.step + 1, questions.length - 1) }));
   }
 
   function goBack() {
     if (showResult) {
-      setShowResult(false);
-      setStep(questions.length - 1);
+      setWizardState((current) => ({ ...current, showResult: false, step: questions.length - 1 }));
       return;
     }
 
-    setStep((current) => Math.max(current - 1, 0));
+    setWizardState((current) => ({ ...current, step: Math.max(current.step - 1, 0) }));
   }
 
   function restart() {
-    setAnswers({});
-    setStep(0);
-    setShowResult(false);
+    setWizardState(emptyWizardState);
+    setActionFeedback(null);
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      setActionFeedback("当前浏览器未允许清除本地保存");
+    }
+    window.history.replaceState(null, "", window.location.pathname);
+  }
+
+  async function copyResult() {
+    try {
+      await writeClipboard(resultMarkdown);
+      setActionFeedback("方案已复制");
+    } catch {
+      setActionFeedback("复制失败，请手动选择文本");
+    }
+  }
+
+  async function copyShareLink() {
+    try {
+      await writeClipboard(createShareUrl(answers));
+      setActionFeedback("分享链接已复制");
+    } catch {
+      setActionFeedback("复制失败，请检查浏览器权限");
+    }
+  }
+
+  function exportMarkdown() {
+    downloadMarkdown(resultMarkdown);
+    setActionFeedback("Markdown 已导出");
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f8f4] text-slate-950">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-4 border-b border-slate-200 py-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-teal-700">Vibe Coding Decision</p>
-            <h1 className="mt-1 text-2xl font-semibold text-slate-950 sm:text-3xl">从想法到开发路线</h1>
+    <main className="toy-page text-[#172033]">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-4 py-4 sm:px-6 lg:px-8">
+        <header className="toy-topbar">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="toy-brand-mark" aria-hidden="true">
+              <Code2 className="h-6 w-6" />
+            </span>
+            <div className="min-w-0">
+              <p className="toy-kicker">Toy Workshop</p>
+              <h1 className="truncate text-2xl font-black sm:text-3xl">Vibe Coding 技术栈装配台</h1>
+            </div>
           </div>
+
           <div className="flex items-center gap-3">
-            <div className="hidden min-w-44 rounded-lg border border-slate-200 bg-white px-3 py-2 sm:block">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-500">
-                <span>进度</span>
-                <span>{progress}%</span>
+            <div className="hidden min-w-52 sm:block">
+              <div className="flex items-center justify-between text-xs font-black text-[#475569]">
+                <span>Build Meter</span>
+                <span>{answeredCount}/{questions.length}</span>
               </div>
-              <div className="mt-2 h-2 rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-teal-600 transition-all" style={{ width: `${progress}%` }} />
+              <div className="toy-ruler mt-2" aria-hidden="true">
+                <span style={{ width: `${progress}%` }} />
               </div>
             </div>
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
-              onClick={restart}
-              type="button"
-            >
+            <WorkshopAction onClick={restart} tone="danger">
               <RefreshCcw className="h-4 w-4" aria-hidden="true" />
               重选
-            </button>
+            </WorkshopAction>
           </div>
         </header>
 
-        <div className="grid flex-1 gap-6 py-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="lg:border-r lg:border-slate-200 lg:pr-6">
+        <div className="grid flex-1 gap-4 py-5 lg:grid-cols-[300px_minmax(0,1fr)_270px]">
+          <aside className="toy-pegboard">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-black text-[#172033]">零件架</p>
+              <span className="toy-counter">{answeredCount}/{questions.length}</span>
+            </div>
             <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-1" aria-label="决策步骤">
-              {questions.map((item, index) => {
-                const isActive = !showResult && index === step;
-                const isDone = Boolean(answers[item.id]);
-
-                return (
-                  <button
-                    className={cx(
-                      "flex min-h-16 items-center gap-3 rounded-lg border px-3 py-2 text-left transition",
-                      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600",
-                      isActive
-                        ? "border-teal-600 bg-teal-50"
-                        : isDone
-                          ? "border-emerald-200 bg-white"
-                          : "border-slate-200 bg-white hover:bg-slate-50"
-                    )}
-                    key={item.id}
-                    onClick={() => {
-                      setStep(index);
-                      setShowResult(false);
-                    }}
-                    type="button"
-                  >
-                    <span
-                      className={cx(
-                        "grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-semibold",
-                        isDone ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
-                      )}
-                    >
-                      {isDone ? <Check className="h-4 w-4" aria-hidden="true" /> : index + 1}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-semibold text-slate-950">{item.eyebrow}</span>
-                      <span className="block truncate text-xs text-slate-500">
-                        {answers[item.id]
-                          ? item.options.find((option) => option.id === answers[item.id])?.shortLabel
-                          : "未选择"}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
+              {questions.map((item, index) => (
+                <StepButton
+                  active={!showResult && index === step}
+                  answer={answers[item.id]}
+                  done={Boolean(answers[item.id])}
+                  index={index}
+                  key={item.id}
+                  onClick={() => {
+                    setWizardState((current) => ({ ...current, step: index, showResult: false }));
+                  }}
+                  question={item}
+                />
+              ))}
             </nav>
           </aside>
 
-          <section className="min-w-0">
+          <section className="toy-workbench">
             {!showResult ? (
-              <div className="mx-auto max-w-4xl">
-                <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex min-h-full flex-col">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-teal-700">{question.eyebrow}</p>
-                    <h2 className="mt-2 text-3xl font-semibold text-slate-950">{question.title}</h2>
+                    <p className="toy-stage-label">
+                      <span style={{ background: stepAccents[step % stepAccents.length] }} />
+                      {question.eyebrow}
+                    </p>
+                    <h2 className="mt-3 text-3xl font-black leading-tight text-[#172033] sm:text-4xl">
+                      {question.title}
+                    </h2>
                   </div>
-                  <p className="text-sm font-medium text-slate-500">
+                  <span className="toy-step-chip">
                     {step + 1} / {questions.length}
-                  </p>
+                  </span>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {question.options.map((option) => (
                     <OptionButton
                       key={option.id}
@@ -254,99 +761,102 @@ export default function DecisionWizard() {
                   ))}
                 </div>
 
-                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <button
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={step === 0}
-                    onClick={goBack}
-                    type="button"
-                  >
+                <div className="mt-auto flex flex-col-reverse gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
+                  <WorkshopAction disabled={step === 0} onClick={goBack}>
                     <ArrowLeft className="h-4 w-4" aria-hidden="true" />
                     上一步
-                  </button>
-                  <button
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                    disabled={!currentAnswer}
-                    onClick={goNext}
-                    type="button"
-                  >
-                    {isLastStep ? "生成路线" : "下一步"}
+                  </WorkshopAction>
+                  <WorkshopAction disabled={!currentAnswer} onClick={goNext} tone="primary">
+                    {isLastStep ? "生成技术栈" : "下一步"}
                     <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                  </button>
+                  </WorkshopAction>
                 </div>
               </div>
             ) : (
-              <div className="mx-auto max-w-5xl">
-                <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="max-w-2xl">
-                      <p className="text-sm font-semibold text-teal-700">{recommendation.routeTag}</p>
-                      <h2 className="mt-2 text-3xl font-semibold text-slate-950">{recommendation.routeTitle}</h2>
-                      <p className="mt-3 text-base leading-7 text-slate-650">{recommendation.routeSummary}</p>
-                    </div>
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 lg:w-72">
-                      <p className="text-sm font-semibold text-amber-950">下一步</p>
-                      <p className="mt-2 text-sm leading-6 text-amber-900">{recommendation.nextMove}</p>
-                    </div>
+              <div className="flex min-h-full flex-col">
+                <div className="toy-result-head">
+                  <div className="max-w-3xl">
+                    <p className="toy-stage-label">
+                      <span style={{ background: "#0f9f7a" }} />
+                      {recommendation.routeTag}
+                    </p>
+                    <h2 className="mt-3 text-3xl font-black leading-tight text-[#172033] sm:text-4xl">
+                      {recommendation.routeTitle}
+                    </h2>
+                    <p className="mt-4 text-base leading-7 text-[#334155]">{recommendation.routeSummary}</p>
+                  </div>
+                  <div className="toy-next-note">
+                    <p className="text-sm font-black text-[#172033]">下一步</p>
+                    <p className="mt-2 text-sm leading-6 text-[#334155]">{recommendation.nextMove}</p>
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <TaskList title="今天开始" items={recommendation.todayTasks} />
-                    <TaskList title="本周完成" items={recommendation.weekTasks} />
-                    <TaskList title="上线前检查" items={recommendation.launchChecks} />
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                      <h3 className="text-sm font-semibold text-slate-950">推荐工具栈</h3>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {recommendation.stack.map((item) => (
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700" key={item}>
-                            {item}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-4">
-                      <h3 className="flex items-center gap-2 text-sm font-semibold text-rose-950">
-                        <ShieldAlert className="h-4 w-4" aria-hidden="true" />
-                        风险提醒
-                      </h3>
-                      <ul className="mt-3 space-y-2">
-                        {recommendation.risks.map((risk) => (
-                          <li className="text-sm leading-6 text-rose-900" key={risk}>
-                            {risk}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <WorkshopAction onClick={copyResult}>
+                    <Copy className="h-4 w-4" aria-hidden="true" />
+                    复制方案
+                  </WorkshopAction>
+                  <WorkshopAction onClick={copyShareLink}>
+                    <Link2 className="h-4 w-4" aria-hidden="true" />
+                    分享链接
+                  </WorkshopAction>
+                  <WorkshopAction onClick={exportMarkdown}>
+                    <Download className="h-4 w-4" aria-hidden="true" />
+                    导出 Markdown
+                  </WorkshopAction>
                 </div>
 
-                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <button
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                    onClick={goBack}
-                    type="button"
-                  >
+                <div className="mt-5">
+                  <DecisionPath items={recommendation.decisionPath} />
+                </div>
+
+                <div className="mt-5">
+                  <StackToolbox items={recommendation.stack} />
+                </div>
+
+                <div className="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <TaskList accent="#ef4444" title="今天开始" items={recommendation.todayTasks} />
+                    <TaskList accent="#2563eb" title="本周完成" items={recommendation.weekTasks} />
+                    <TaskList accent="#0f9f7a" title="上线前检查" items={recommendation.launchChecks} />
+                  </div>
+
+                  <section className="toy-risk-box">
+                    <div className="flex items-center gap-2">
+                      <ShieldAlert className="h-4 w-4 text-[#ef4444]" aria-hidden="true" />
+                      <h3 className="text-sm font-black text-[#172033]">风险提醒</h3>
+                    </div>
+                    <ul className="mt-4 space-y-3">
+                      {recommendation.risks.map((risk) => (
+                        <li className="text-sm leading-6 text-[#334155]" key={risk}>
+                          {risk}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                </div>
+
+                <div className="mt-auto flex flex-col-reverse gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
+                  <WorkshopAction onClick={goBack}>
                     <ArrowLeft className="h-4 w-4" aria-hidden="true" />
                     修改答案
-                  </button>
-                  <button
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
-                    onClick={restart}
-                    type="button"
-                  >
+                  </WorkshopAction>
+                  <WorkshopAction onClick={restart} tone="primary">
                     <RefreshCcw className="h-4 w-4" aria-hidden="true" />
                     重新开始
-                  </button>
+                  </WorkshopAction>
                 </div>
               </div>
             )}
           </section>
+
+          <SideTray
+            actionFeedback={actionFeedback}
+            answers={answers}
+            progress={progress}
+            recommendation={recommendation}
+            showResult={showResult}
+          />
         </div>
       </div>
     </main>
