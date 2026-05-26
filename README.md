@@ -9,7 +9,6 @@
 - 支持 JavaScript/TypeScript、Python、C/C++、Java 和全新学习者路线。
 - 针对 Android + Java、Qt + C++、React Native / Expo、Flutter、SwiftUI、FastAPI 等场景给出不同推荐。
 - 支持分享链接、复制方案、导出 Markdown。
-- 自动兼容旧三问链接，缺少 `target` 时默认按 Web 应用处理。
 
 ## 决策模型
 
@@ -49,11 +48,6 @@ npm run dev
 http://localhost:3000
 ```
 
-如果 3000 端口被占用，可以换端口：
-
-```bash
-npm run dev -- --port 3001
-```
 
 ## 校验与构建
 
@@ -74,3 +68,6 @@ src/app/globals.css                # Toy Workshop 视觉样式
 ## 部署
 
 这是一个标准 Next.js 应用，可以部署到 Vercel、Netlify 或其他支持 Next.js 的平台。
+
+## 致谢
+[LinuxDO社区](https://linux.do/)
